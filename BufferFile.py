@@ -68,8 +68,6 @@ class BufferFile:
         if lock_acquired:
             self.shelf.sync()
             self.mutex_lock.release()
-        else:
-            raise LockAcquireError("Failed to acquire mutex lock")
 
 
 

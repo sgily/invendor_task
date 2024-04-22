@@ -6,6 +6,7 @@ from datetime import datetime,timezone
 from SwaggerSession import SwaggerSession
 import logging
 from BufferFile import BufferFile
+from BufferFile import LockAcquireError
 
 HOST = "gpshost"  # Standard loopback interface address (localhost)
 PORT = 8080  # Port to listen on (non-privileged ports are > 1023)
@@ -22,13 +23,13 @@ if __name__ == "__main__":
         s.connect((HOST, PORT))
         cnt = 0
         while (True):
-            data = s.recv(1024)
-            timestamp = f"{datetime.now(timezone.utc).replace(tzinfo=None).isoformat(timespec='milliseconds')}Z"
-            latitude = struct.unpack('>f', data[0:4])[0]
-            longitude = struct.unpack('>f', data[4:8])[0]
-            #print(f"raw data {data.hex()} len {len(data)}")
-            #print(f"client socket recv ts: {timestamp} lat: {latitude} long: {longitude}")
-            #rbuf.append([timestamp, latitude, longitude])
-            rbuf.push_entry(timestamp, latitude, longitude)
-
-    
+            try:
+                data = s.recv(1024)
+                timestamp = f"{datetime.now(timezone.utc).replace(tzinfo=None).isoformat(timespec='milliseconds')}Z"
+                latitude = struct.unpack('>f', data[0:4])[0]
+                longitude = struct.unpack('>f', data[4:8])[0]
+                #print(f"raw data {data.hex()} len {len(data)}")
+                #print(f"client socket recv ts: {timestamp} lat: {latitude} long: {longitude}")
+                rbuf.push_entry(timestamp, latitude, longitude)
+            except LockAcquireError:
+                logger.error("Failed to acquire lock, packet lost")

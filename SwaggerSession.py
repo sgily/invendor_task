@@ -1,9 +1,11 @@
 from threading import Thread
 import time
 from oauthlib.oauth2 import BackendApplicationClient
+from oauthlib.oauth2 import TokenExpiredError
 from requests_oauthlib import OAuth2Session
 import logging
 from BufferFile import BufferFile
+from BufferFile import LockAcquireError
 
 TOKEN_URL = "https://demo-api.invendor.com/connect/token"
 POST_URL = "https://demo-api.invendor.com/api/GPSEntries"
@@ -23,17 +25,31 @@ class SwaggerSession(Thread):
 
     def run(self):
         logger.info("Start session thread")
+        payload = None
+        retry = False
         while True:
-            # if not bool(self.data_buf):
-            #     time.sleep(0.5)
-            if self.buffer.is_empty():
-                time.sleep(0.1)
-            else:
-                # data_entry = self.data_buf.popleft()
-                # payload = {'createdDateTime': data_entry[0],
-                #             'latitude': str(data_entry[1]),
-                #             'longitude': str(data_entry[2])}
-                payload = self.buffer.pop_entry().as_payload()
-                resp = self.session.post(url=POST_URL,json=payload)
-                logger.info(f"sent {payload}, response: {resp}")
+                if self.buffer.is_empty():
+                    time.sleep(0.1)
+                else:
+                    try:
+                        if not retry:
+                            payload = self.buffer.pop_entry().as_payload()
+                    except LockAcquireError:
+                        logger.error(f"Failed to acquire key")
+                        continue
+                    try:
+                        resp = self.session.post(url=POST_URL,json=payload)
+                    except TokenExpiredError:
+                        logger.error(f"token expired, refreshing")
+                        self.token = self.session.fetch_token(token_url=TOKEN_URL, client_id=self.client_id, client_secret=self.secret)
+                        logger.info("Retrying failed request")
+                        retry = True
+                    except Exception as err:
+                        logger.error(f" {err=}, {type(err)=}")
+                        logger.info("Retrying failed request")
+                        retry = True
+                    else:
+                        logger.info(f"sent {payload}, response: {resp}")
+                        
+            
             
