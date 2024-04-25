@@ -1,9 +1,9 @@
 
 from threading import Lock
-from threading import Timer
 import collections
 import shelve
 import logging
+import time
 
 STORAGE_FNAME = "coordinate_data"
 STORAGE_TAG = 'store'
@@ -26,13 +26,15 @@ class Coordinates:
 class BufferFile:
     def __init__(self):
         self.mutex_lock = Lock()
-        self.shelf = shelve.open(STORAGE_FNAME, writeback=True)
-        self.shelf[STORAGE_TAG] = collections.deque(maxlen=144000) # 2 hours at 50ms
-        self.data_buffer = self.shelf[STORAGE_TAG]
-        Timer(1, self.backup_data).start()
-
-    def __del__(self):
-        self.shelf.close()
+        with shelve.open(STORAGE_FNAME, writeback=False) as shelf:
+            logger.info(f"shelf keys {list(shelf.keys())}")
+            if len(shelf.keys()) == 0:
+                #self.shelf[STORAGE_TAG] = collections.deque(maxlen=144000) # 2 hours at 50ms
+                logger.info("Creating new shelve file")
+                self.data_buffer = collections.deque(maxlen=144000) # 2 hours at 50ms
+            else:
+                logger.info("Using existing shelf")
+                self.data_buffer = shelf[STORAGE_TAG]
 
     def push_entry(self, timestamp, latitude, longitude):
         logger.info(f"push {timestamp} {latitude} {longitude}")
@@ -52,7 +54,7 @@ class BufferFile:
             logger.info(f"popped {entry.as_payload()}")
             self.mutex_lock.release()
         else:
-            raise LockAcquireError("Failed to acquire mutex lock")
+            entry = None
         return entry
     
     def is_empty(self):
@@ -63,11 +65,17 @@ class BufferFile:
     
     def backup_data(self):
         if self.is_empty():
-            return
-        lock_acquired = self.mutex_lock.acquire(timeout=0.1)
-        if lock_acquired:
-            self.shelf.sync()
-            self.mutex_lock.release()
+            logger.info("Nothing to back up")
+        else:
+            lock_acquired = self.mutex_lock.acquire(timeout=0.1)
+            if lock_acquired:
+                logger.info("Backing up data")
+                ts = time.time_ns()
+                with shelve.open(STORAGE_FNAME, writeback=False) as shelf:
+                    shelf[STORAGE_TAG] = self.data_buffer
+                    shelf.sync()
+                logger.info(f"backup took {time.time_ns() - ts}")
+                self.mutex_lock.release()
 
 
 
